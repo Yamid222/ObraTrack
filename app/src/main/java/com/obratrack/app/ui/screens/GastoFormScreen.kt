@@ -14,9 +14,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -29,10 +33,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obratrack.app.data.CategoriaGasto
+import com.obratrack.app.data.Categorias
 import com.obratrack.app.data.Gasto
 import com.obratrack.app.ui.Archivos
 import com.obratrack.app.ui.BarraSuperior
@@ -64,6 +71,10 @@ fun GastoFormScreen(
     var confirmarEliminar by remember { mutableStateOf(false) }
     var verFactura by remember { mutableStateOf(false) }
     var original by remember { mutableStateOf<Gasto?>(null) }
+    var nuevaCategoria by remember { mutableStateOf<String?>(null) } // texto del diálogo; null = cerrado
+    var verCategorias by remember { mutableStateOf(false) }
+    val propias by vm.categorias.collectAsStateWithLifecycle()
+    val opcionesCategoria = Categorias.todas(propias)
 
     LaunchedEffect(gastoId) {
         if (gastoId != 0L) {
@@ -138,17 +149,33 @@ fun GastoFormScreen(
             Spacer(Modifier.height(8.dp))
             SelectorFecha(etiqueta = "Fecha", valor = fecha, onCambio = { fecha = it })
 
-            TituloSeccion("Categoría")
-            CategoriaGasto.entries.chunked(2).forEach { fila ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TituloSeccion("Categoría", Modifier.weight(1f))
+                if (propias.isNotEmpty()) {
+                    IconButton(onClick = { verCategorias = true }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Renombrar o eliminar categorías")
+                    }
+                }
+                IconButton(onClick = { nuevaCategoria = "" }) {
+                    Icon(
+                        Icons.Default.AddCircle,
+                        contentDescription = "Crear categoría",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            opcionesCategoria.chunked(2).forEach { fila ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     fila.forEach { opcion ->
                         FilterChip(
-                            selected = categoria == opcion.name,
-                            onClick = { categoria = opcion.name },
-                            label = { Text(opcion.etiqueta) },
+                            selected = categoria == opcion.clave,
+                            onClick = { categoria = opcion.clave },
+                            label = { Text(opcion.etiqueta, maxLines = 1) },
                             modifier = Modifier.weight(1f)
                         )
                     }
+                    // Si la fila queda con una sola categoría, se completa para que no se estire.
+                    if (fila.size == 1) Spacer(Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -221,6 +248,51 @@ fun GastoFormScreen(
             latitud = null,
             longitud = null,
             onCerrar = { verFactura = false }
+        )
+    }
+
+    if (verCategorias) {
+        DialogoCategorias(
+            vm = vm,
+            onCerrar = { verCategorias = false },
+            // Si se borra la categoría que estaba elegida en este gasto, se vuelve a Materiales.
+            onEliminada = { clave -> if (categoria == clave) categoria = CategoriaGasto.MATERIALES.name }
+        )
+    }
+
+    nuevaCategoria?.let { texto ->
+        AlertDialog(
+            onDismissRequest = { nuevaCategoria = null },
+            title = { Text("Nueva categoría") },
+            text = {
+                Column {
+                    Text(
+                        "Quedará disponible para los gastos de todas las obras.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = texto,
+                        onValueChange = { nuevaCategoria = it.take(30) },
+                        label = { Text("Nombre (ej: Herramientas)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = texto.isNotBlank(),
+                    onClick = {
+                        vm.crearCategoria(texto) { clave -> categoria = clave }
+                        nuevaCategoria = null
+                    }
+                ) { Text("Crear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { nuevaCategoria = null }) { Text("Cancelar") }
+            }
         )
     }
 

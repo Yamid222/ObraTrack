@@ -21,6 +21,7 @@ import android.widget.Toast
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Engineering
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -28,6 +29,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -42,6 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obratrack.app.data.Asistencia
 import com.obratrack.app.data.CategoriaGasto
+import com.obratrack.app.data.CategoriaVista
+import com.obratrack.app.data.Categorias
 import com.obratrack.app.data.Gasto
 import com.obratrack.app.data.ManoDeObra
 import com.obratrack.app.data.Obra
@@ -63,6 +67,7 @@ fun TabBalance(vm: ObraViewModel, obra: Obra) {
     val flujoAsistencias = remember(obra.id) { vm.asistencias(obra.id) }
     val asistencias by flujoAsistencias.collectAsStateWithLifecycle(initialValue = emptyList<Asistencia>())
     val context = LocalContext.current
+    val propias by vm.categorias.collectAsStateWithLifecycle()
 
     // Mano de obra calculada con la asistencia y la parte que todavía no se ha sumado como gasto.
     val manoCalculada = ManoDeObra.costo(asistencias, trabajadores)
@@ -141,11 +146,21 @@ fun TabBalance(vm: ObraViewModel, obra: Obra) {
 
         if (manoCalculada > 0L) {
             item {
-                TarjetaManoDeObra(calculada = manoCalculada, sumada = manoSumada, pendiente = manoPendiente) {
-                    vm.sumarManoDeObra(obra.id, manoPendiente) {
-                        Toast.makeText(context, "Mano de obra sumada al presupuesto", Toast.LENGTH_SHORT).show()
+                TarjetaManoDeObra(
+                    calculada = manoCalculada,
+                    sumada = manoSumada,
+                    pendiente = manoPendiente,
+                    onSumar = {
+                        vm.sumarManoDeObra(obra.id, manoPendiente) {
+                            Toast.makeText(context, "Mano de obra sumada al presupuesto", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onRestar = {
+                        vm.restarManoDeObra(obra.id) {
+                            Toast.makeText(context, "Mano de obra restada del presupuesto", Toast.LENGTH_SHORT).show()
+                        }
                     }
-                }
+                )
             }
         }
 
@@ -158,10 +173,17 @@ fun TabBalance(vm: ObraViewModel, obra: Obra) {
                 )
             }
         } else {
-            val porCategoria = CategoriaGasto.entries.map { cat ->
-                val delaCategoria = gastos.filter { it.categoria == cat.name }
-                Triple(cat, delaCategoria.sumOf { it.monto }, delaCategoria.size)
-            }
+            val opciones = Categorias.todas(propias)
+            val fijas = CategoriaGasto.entries.map { it.name }.toSet()
+            // Cada gasto se agrupa en su categoría (si se perdió la suya, cuenta como "Otros").
+            val agrupados = gastos.groupBy { Categorias.buscar(it.categoria, opciones).clave }
+            val porCategoria = opciones
+                .map { cat ->
+                    val delaCategoria = agrupados[cat.clave].orEmpty()
+                    Triple(cat, delaCategoria.sumOf { it.monto }, delaCategoria.size)
+                }
+                // Las fijas siempre se ven; las propias solo si esta obra tiene gastos en ellas.
+                .filter { (cat, _, cantidad) -> cat.clave in fijas || cantidad > 0 }
             items(porCategoria.size) { i ->
                 val (categoria, monto, cantidad) = porCategoria[i]
                 FilaCategoria(categoria, monto, cantidad, obra.presupuesto)
@@ -179,7 +201,7 @@ private fun Cifra(titulo: String, valor: String, color: Color) {
 }
 
 @Composable
-private fun FilaCategoria(categoria: CategoriaGasto, monto: Long, cantidad: Int, presupuesto: Long) {
+private fun FilaCategoria(categoria: CategoriaVista, monto: Long, cantidad: Int, presupuesto: Long) {
     val color = Color(categoria.argb)
     val porcentaje = Formato.porcentaje(monto, presupuesto)
 
@@ -218,7 +240,13 @@ private fun FilaCategoria(categoria: CategoriaGasto, monto: Long, cantidad: Int,
 
 /** Mano de obra que sale de la asistencia, con el botón para registrarla como gasto. */
 @Composable
-private fun TarjetaManoDeObra(calculada: Long, sumada: Long, pendiente: Long, onSumar: () -> Unit) {
+private fun TarjetaManoDeObra(
+    calculada: Long,
+    sumada: Long,
+    pendiente: Long,
+    onSumar: () -> Unit,
+    onRestar: () -> Unit
+) {
     val color = Color(CategoriaGasto.MANO_DE_OBRA.argb)
     TarjetaBase(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
@@ -260,6 +288,19 @@ private fun TarjetaManoDeObra(calculada: Long, sumada: Long, pendiente: Long, on
                     style = MaterialTheme.typography.bodyMedium,
                     color = Paleta.Verde
                 )
+            }
+            // Si ya se sumó algo, se puede restar para dejarlo como estaba (y volver a sumarlo después).
+            if (sumada > 0L) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onRestar,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Paleta.Rojo)
+                ) {
+                    Icon(Icons.Default.Remove, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Restar ${Formato.pesos(sumada)} del presupuesto")
+                }
             }
         }
     }

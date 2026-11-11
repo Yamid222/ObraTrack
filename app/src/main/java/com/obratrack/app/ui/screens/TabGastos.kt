@@ -33,7 +33,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.obratrack.app.data.CategoriaGasto
+import com.obratrack.app.data.CategoriaVista
+import com.obratrack.app.data.Categorias
 import com.obratrack.app.data.Gasto
 import com.obratrack.app.data.Obra
 import com.obratrack.app.ui.EstadoVacio
@@ -52,6 +53,8 @@ fun TabGastos(vm: ObraViewModel, obra: Obra, navegar: (String) -> Unit) {
     val flujo = remember(obra.id) { vm.gastos(obra.id) }
     val gastos by flujo.collectAsStateWithLifecycle(initialValue = emptyList<Gasto>())
     var facturaVista by remember { mutableStateOf<Gasto?>(null) }
+    val propias by vm.categorias.collectAsStateWithLifecycle()
+    val opcionesCategoria = Categorias.todas(propias)
 
     if (gastos.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -90,6 +93,7 @@ fun TabGastos(vm: ObraViewModel, obra: Obra, navegar: (String) -> Unit) {
             items(gastos, key = { it.id }) { gasto ->
                 TarjetaGasto(
                     gasto = gasto,
+                    categoria = Categorias.buscar(gasto.categoria, opcionesCategoria),
                     onClick = { navegar(Rutas.gastoForm(obra.id, gasto.id)) },
                     onFactura = { facturaVista = gasto }
                 )
@@ -111,8 +115,7 @@ fun TabGastos(vm: ObraViewModel, obra: Obra, navegar: (String) -> Unit) {
 }
 
 @Composable
-private fun TarjetaGasto(gasto: Gasto, onClick: () -> Unit, onFactura: () -> Unit) {
-    val categoria = CategoriaGasto.desde(gasto.categoria)
+private fun TarjetaGasto(gasto: Gasto, categoria: CategoriaVista, onClick: () -> Unit, onFactura: () -> Unit) {
     val color = Color(categoria.argb)
 
     TarjetaBase(modifier = Modifier.fillMaxWidth(), onClick = onClick) {

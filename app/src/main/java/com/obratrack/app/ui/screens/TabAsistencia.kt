@@ -1,6 +1,11 @@
 package com.obratrack.app.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,12 +21,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,6 +51,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
@@ -132,6 +144,9 @@ private fun RegistroAsistencia(
         return
     }
 
+    // Un día que ya tiene asistencia guardada no se vuelve a registrar; se corrige desde Pagos.
+    val yaRegistrado = delDia.isNotEmpty()
+
     val hayInvalidos = trabajadores.any { t ->
         val texto = cantidades[t.id]
         texto != null && (leerCantidad(texto) ?: 0.0) <= 0.0
@@ -143,6 +158,27 @@ private fun RegistroAsistencia(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item { SelectorFecha(etiqueta = "Fecha de asistencia", valor = fecha, onCambio = onFecha) }
+        if (yaRegistrado) {
+            item {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Paleta.Ambar.copy(alpha = 0.12f))
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = Paleta.Ambar)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "La asistencia del ${Formato.fecha(fecha)} ya está registrada. " +
+                            "Para corregirla, ve a Pagos y toca el nombre del trabajador.",
+                        color = Paleta.Ambar,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -150,13 +186,15 @@ private fun RegistroAsistencia(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
-                TextButton(onClick = {
-                    trabajadores.forEach { t ->
-                        if (cantidades[t.id] == null) {
-                            cantidades[t.id] = cantidadPorDefecto(t)
+                if (!yaRegistrado) {
+                    TextButton(onClick = {
+                        trabajadores.forEach { t ->
+                            if (cantidades[t.id] == null) {
+                                cantidades[t.id] = cantidadPorDefecto(t)
+                            }
                         }
-                    }
-                }) { Text("Marcar todos") }
+                    }) { Text("Marcar todos") }
+                }
             }
         }
         items(trabajadores, key = { it.id }) { trabajador ->
@@ -166,6 +204,7 @@ private fun RegistroAsistencia(
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(
                         checked = texto != null,
+                        enabled = !yaRegistrado,
                         onCheckedChange = { marcado ->
                             if (marcado) cantidades[trabajador.id] = cantidadPorDefecto(trabajador)
                             else cantidades.remove(trabajador.id)
@@ -185,6 +224,7 @@ private fun RegistroAsistencia(
                             onValueChange = { nuevo -> cantidades[trabajador.id] = nuevo.filter { it.isDigit() || it == '.' || it == ',' }.take(6) },
                             label = { Text(tipo.unidad.replaceFirstChar { it.uppercase() }) },
                             isError = intento && (leerCantidad(texto) ?: 0.0) <= 0.0,
+                            enabled = !yaRegistrado,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.width(120.dp).padding(end = 6.dp)
@@ -193,7 +233,7 @@ private fun RegistroAsistencia(
                 }
             }
         }
-        item {
+        if (!yaRegistrado) item {
             Spacer(Modifier.height(6.dp))
             if (intento && hayInvalidos) {
                 Text(
@@ -317,6 +357,7 @@ private fun PagosSemana(vm: ObraViewModel, obra: Obra, trabajadores: List<Trabaj
     val flujo = remember(obra.id) { vm.asistencias(obra.id) }
     val asistencias by flujo.collectAsStateWithLifecycle(initialValue = emptyList<Asistencia>())
     var verTotal by rememberSaveable { mutableStateOf(false) }
+    var trabajadorSemana by remember { mutableStateOf<Trabajador?>(null) }
 
     if (trabajadores.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -414,7 +455,7 @@ private fun PagosSemana(vm: ObraViewModel, obra: Obra, trabajadores: List<Trabaj
             val tipo = TipoPago.desde(t.tipoPago)
             val suyas = deLaSemana.filter { it.trabajadorId == t.id }
             val pago = suyas.sumOf { ManoDeObra.costoDia(t, it.cantidad) }
-            TarjetaBase(Modifier.fillMaxWidth()) {
+            TarjetaBase(Modifier.fillMaxWidth(), onClick = { trabajadorSemana = t }) {
                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(t.nombre, style = MaterialTheme.typography.titleMedium)
@@ -436,4 +477,176 @@ private fun PagosSemana(vm: ObraViewModel, obra: Obra, trabajadores: List<Trabaj
             }
         }
     }
+
+    trabajadorSemana?.let { t ->
+        DialogoSemana(
+            vm = vm,
+            obra = obra,
+            trabajador = t,
+            asistencias = asistencias.filter { it.trabajadorId == t.id },
+            onCerrar = { trabajadorSemana = null }
+        )
+    }
+}
+
+private val nombresDias = listOf("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+
+/** Semana de un trabajador: cada día con su fecha, en verde los que asistió; tocar un día permite corregirlo. */
+@Composable
+private fun DialogoSemana(
+    vm: ObraViewModel,
+    obra: Obra,
+    trabajador: Trabajador,
+    asistencias: List<Asistencia>,
+    onCerrar: () -> Unit
+) {
+    val tipo = TipoPago.desde(trabajador.tipoPago)
+    var inicio by remember { mutableStateOf(ManoDeObra.inicioSemanaActual()) }
+    var editando by remember { mutableStateOf<Long?>(null) } // fecha del día que se corrige
+    val porFecha = asistencias.associateBy { it.fecha }
+    val fechas = (0..6).map { inicio + it * ManoDeObra.DIA }
+    val asistidos = fechas.mapNotNull { porFecha[it] }
+    val pago = asistidos.sumOf { ManoDeObra.costoDia(trabajador, it.cantidad) }
+    val hoy = Formato.hoy()
+
+    AlertDialog(
+        onDismissRequest = onCerrar,
+        title = {
+            Column {
+                Text(trabajador.nombre)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { inicio -= 7 * ManoDeObra.DIA }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Semana anterior")
+                    }
+                    Text(
+                        "${Formato.fecha(fechas.first())} al ${Formato.fecha(fechas.last())}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center
+                    )
+                    IconButton(onClick = { inicio += 7 * ManoDeObra.DIA }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Semana siguiente")
+                    }
+                }
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                fechas.forEachIndexed { i, dia ->
+                    val registro = porFecha[dia]
+                    val fondo = if (registro != null) Paleta.Verde.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(fondo)
+                            .clickable { editando = dia }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                nombresDias[i] + if (dia == hoy) " (hoy)" else "",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (registro != null) Paleta.Verde else MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                Formato.fecha(dia),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (registro != null) {
+                            Text(
+                                "${Formato.numero(registro.cantidad)} ${tipo.unidad}",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Paleta.Verde
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Icon(Icons.Default.CheckCircle, contentDescription = "Asistió", tint = Paleta.Verde)
+                        } else {
+                            Text(
+                                "No asistió",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "${asistidos.size} de ${trabajador.diasSemana} días · ${Formato.pesos(pago)}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(
+                    "Toca un día para corregir la asistencia.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onCerrar) { Text("Cerrar") } }
+    )
+
+    editando?.let { dia ->
+        DialogoCorregirDia(
+            trabajador = trabajador,
+            fecha = dia,
+            actual = porFecha[dia]?.cantidad,
+            onCancelar = { editando = null },
+            onGuardar = { cantidad ->
+                vm.corregirAsistencia(obra.id, trabajador.id, dia, cantidad) { editando = null }
+            }
+        )
+    }
+}
+
+/** Corrige un día: marcar o quitar la asistencia y cambiar las horas o unidades. */
+@Composable
+private fun DialogoCorregirDia(
+    trabajador: Trabajador,
+    fecha: Long,
+    actual: Double?,
+    onCancelar: () -> Unit,
+    onGuardar: (Double?) -> Unit
+) {
+    val tipo = TipoPago.desde(trabajador.tipoPago)
+    var asistio by remember { mutableStateOf(actual != null) }
+    var texto by remember { mutableStateOf(actual?.let { Formato.numero(it) } ?: cantidadPorDefecto(trabajador)) }
+    val cantidad = leerCantidad(texto)
+    val valido = !asistio || (cantidad != null && cantidad > 0.0)
+
+    AlertDialog(
+        onDismissRequest = onCancelar,
+        title = { Text("Corregir ${Formato.fecha(fecha)}") },
+        text = {
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().clickable { asistio = !asistio },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = asistio, onCheckedChange = { asistio = it })
+                    Text("${trabajador.nombre} asistió", style = MaterialTheme.typography.bodyLarge)
+                }
+                if (asistio) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = texto,
+                        onValueChange = { nuevo -> texto = nuevo.filter { it.isDigit() || it == '.' || it == ',' }.take(6) },
+                        label = { Text(tipo.unidad.replaceFirstChar { it.uppercase() }) },
+                        isError = !valido,
+                        supportingText = { if (!valido) Text("Escribe un valor mayor a cero") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = valido, onClick = { onGuardar(if (asistio) cantidad else null) }) { Text("Guardar") }
+        },
+        dismissButton = { TextButton(onClick = onCancelar) { Text("Cancelar") } }
+    )
 }

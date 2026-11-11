@@ -7,7 +7,9 @@ import androidx.room.withTransaction
 import com.obratrack.app.data.AcumuladoTrabajador
 import com.obratrack.app.data.AppDatabase
 import com.obratrack.app.data.Asistencia
+import com.obratrack.app.data.Categoria
 import com.obratrack.app.data.CategoriaGasto
+import com.obratrack.app.data.Categorias
 import com.obratrack.app.data.EstadoEtapa
 import com.obratrack.app.data.Etapa
 import com.obratrack.app.data.Foto
@@ -32,6 +34,7 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
     private val trabajadorDao = db.trabajadorDao()
     private val asistenciaDao = db.asistenciaDao()
     private val gastoDao = db.gastoDao()
+    private val categoriaDao = db.categoriaDao()
 
     // ---------- Obras (RF-01) ----------
     val resumenes: StateFlow<List<ObraResumen>> = obraDao.observarResumenes()
@@ -103,7 +106,24 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
 
     fun guardarTrabajador(trabajador: Trabajador, alTerminar: () -> Unit) {
         viewModelScope.launch {
-            if (trabajador.id == 0L) trabajadorDao.insertar(trabajador) else trabajadorDao.actualizar(trabajador)
+            if (trabajador.id == 0L) {
+                trabajadorDao.insertar(trabajador)
+            } else {
+                val antes = trabajadorDao.obtenerTrabajador(trabajador.id)
+                db.withTransaction {
+                    trabajadorDao.actualizar(trabajador)
+                    // Si cambiaron las horas del día, los días completos ya registrados pasan a las horas nuevas
+                    // (así la asistencia muestra el valor nuevo y un día completo se sigue pagando completo).
+                    // Los días con horas parciales se dejan como estaban.
+                    if (antes != null &&
+                        TipoPago.desde(antes.tipoPago).porHoras &&
+                        TipoPago.desde(trabajador.tipoPago).porHoras &&
+                        antes.horasDia != trabajador.horasDia
+                    ) {
+                        asistenciaDao.cambiarHorasDia(trabajador.id, antes.horasDia, trabajador.horasDia)
+                    }
+                }
+            }
             alTerminar()
         }
     }
@@ -124,6 +144,15 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
 
     fun asistencias(obraId: Long): Flow<List<Asistencia>> = asistenciaDao.observarTodas(obraId)
 
+    /** Corrige la asistencia de un trabajador en un día: cantidad null = no asistió. */
+    fun corregirAsistencia(obraId: Long, trabajadorId: Long, fecha: Long, cantidad: Double?, alTerminar: () -> Unit) {
+        viewModelScope.launch {
+            if (cantidad == null) asistenciaDao.borrar(trabajadorId, fecha)
+            else asistenciaDao.guardar(Asistencia(obraId = obraId, trabajadorId = trabajadorId, fecha = fecha, cantidad = cantidad))
+            alTerminar()
+        }
+    }
+
     fun guardarAsistencia(
         fecha: Long,
         presentes: List<Asistencia>,
@@ -136,6 +165,65 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
                 ausentes.forEach { asistenciaDao.borrar(it, fecha) }
             }
             alTerminar()
+        }
+    }
+
+    // ---------- Categorías de gasto (compartidas por todas las obras) ----------
+    val categorias: StateFlow<List<Categoria>> = categoriaDao.observar()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Crea una categoría nueva y devuelve su clave para dejarla seleccionada.
+     * Si ya existe una con el mismo nombre (fija o propia), devuelve esa en vez de repetirla.
+     */
+    fun crearCategoria(nombre: String, alTerminar: (String) -> Unit) {
+        val limpio = nombre.trim().replace(Regex("\\s+"), " ")
+        if (limpio.isEmpty()) return
+        viewModelScope.launch {
+            val propias = categoriaDao.obtenerTodas()
+            val existente = Categorias.todas(propias).firstOrNull { it.etiqueta.equals(limpio, ignoreCase = true) }
+            if (existente != null) {
+                alTerminar(existente.clave)
+            } else {
+                val id = categoriaDao.insertar(Categoria(nombre = limpio, argb = Categorias.colorPara(propias.size)))
+                alTerminar("C$id")
+            }
+        }
+    }
+
+    /** Devuelve los nombres de las obras donde se usa la categoría (vacío = no está en uso). */
+    fun consultarUso(categoria: Categoria, resultado: (List<String>) -> Unit) {
+        viewModelScope.launch { resultado(gastoDao.obrasQueUsan(Categorias.clave(categoria))) }
+    }
+
+    /** Cambia el nombre; devuelve un mensaje de error o null si todo salió bien. */
+    fun renombrarCategoria(categoria: Categoria, nombre: String, resultado: (String?) -> Unit) {
+        val limpio = nombre.trim().replace(Regex("\\s+"), " ")
+        viewModelScope.launch {
+            val repetida = Categorias.todas(categoriaDao.obtenerTodas())
+                .any { it.clave != Categorias.clave(categoria) && it.etiqueta.equals(limpio, ignoreCase = true) }
+            when {
+                limpio.isEmpty() -> resultado("Escribe un nombre.")
+                repetida -> resultado("Ya existe una categoría llamada \"$limpio\".")
+                else -> {
+                    // Los gastos guardan la clave (C + id), así que todos muestran el nombre nuevo.
+                    categoriaDao.actualizar(categoria.copy(nombre = limpio))
+                    resultado(null)
+                }
+            }
+        }
+    }
+
+    /** Elimina la categoría solo si ningún gasto la usa; si está en uso devuelve el mensaje para el usuario. */
+    fun eliminarCategoria(categoria: Categoria, resultado: (String?) -> Unit) {
+        viewModelScope.launch {
+            val obras = gastoDao.obrasQueUsan(Categorias.clave(categoria))
+            if (obras.isNotEmpty()) {
+                resultado(mensajeEnUso(categoria.nombre, obras))
+            } else {
+                categoriaDao.eliminar(categoria)
+                resultado(null)
+            }
         }
     }
 
@@ -174,6 +262,14 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
                     deAsistencia = true
                 )
             )
+            alTerminar()
+        }
+    }
+
+    /** Quita los gastos creados con "Sumar al presupuesto", para que se puedan volver a sumar. */
+    fun restarManoDeObra(obraId: Long, alTerminar: () -> Unit) {
+        viewModelScope.launch {
+            gastoDao.eliminarDeAsistencia(obraId)
             alTerminar()
         }
     }
@@ -217,3 +313,8 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+
+/** Mensaje que se muestra cuando no se puede eliminar una categoría porque tiene gastos. */
+fun mensajeEnUso(nombre: String, obras: List<String>): String =
+    "No se puede eliminar \"$nombre\" porque está en uso en: ${obras.joinToString(", ")}. " +
+        "Primero cambia la categoría de esos gastos."

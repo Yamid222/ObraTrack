@@ -126,6 +126,10 @@ interface AsistenciaDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun guardar(asistencia: Asistencia)
 
+    /** Cambia los días completos (los que tenían las horas viejas) a las horas nuevas. */
+    @Query("UPDATE asistencias SET cantidad = :nuevas WHERE trabajadorId = :trabajadorId AND cantidad = :viejas")
+    suspend fun cambiarHorasDia(trabajadorId: Long, viejas: Double, nuevas: Double)
+
     @Query("DELETE FROM asistencias WHERE trabajadorId = :trabajadorId AND fecha = :fecha")
     suspend fun borrar(trabajadorId: Long, fecha: Long)
 }
@@ -138,6 +142,20 @@ interface GastoDao {
     @Query("SELECT facturaRuta FROM gastos WHERE obraId = :obraId AND facturaRuta IS NOT NULL")
     suspend fun facturasDeObra(obraId: Long): List<String>
 
+    @Query("DELETE FROM gastos WHERE obraId = :obraId AND deAsistencia = 1")
+    suspend fun eliminarDeAsistencia(obraId: Long)
+
+    /** Nombres de las obras que tienen al menos un gasto con esa categoría. */
+    @Query(
+        """
+        SELECT DISTINCT o.nombre FROM gastos g
+        JOIN obras o ON o.id = g.obraId
+        WHERE g.categoria = :clave
+        ORDER BY o.nombre
+        """
+    )
+    suspend fun obrasQueUsan(clave: String): List<String>
+
     @Query("SELECT * FROM gastos WHERE id = :id")
     suspend fun obtenerGasto(id: Long): Gasto?
 
@@ -149,4 +167,22 @@ interface GastoDao {
 
     @Delete
     suspend fun eliminar(gasto: Gasto)
+}
+
+@Dao
+interface CategoriaDao {
+    @Query("SELECT * FROM categorias ORDER BY nombre COLLATE NOCASE ASC")
+    fun observar(): Flow<List<Categoria>>
+
+    @Query("SELECT * FROM categorias")
+    suspend fun obtenerTodas(): List<Categoria>
+
+    @Insert
+    suspend fun insertar(categoria: Categoria): Long
+
+    @Update
+    suspend fun actualizar(categoria: Categoria)
+
+    @Delete
+    suspend fun eliminar(categoria: Categoria)
 }
