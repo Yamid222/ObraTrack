@@ -33,6 +33,9 @@ interface ObraDao {
 
     @Update
     suspend fun actualizar(obra: Obra)
+
+    @Delete
+    suspend fun eliminar(obra: Obra)
 }
 
 @Dao
@@ -57,6 +60,9 @@ interface EtapaDao {
 interface FotoDao {
     @Query("SELECT * FROM fotos WHERE obraId = :obraId ORDER BY fecha ASC")
     fun observarFotosObra(obraId: Long): Flow<List<Foto>>
+
+    @Query("SELECT ruta FROM fotos WHERE obraId = :obraId")
+    suspend fun rutasDeObra(obraId: Long): List<String>
 
     @Query("SELECT * FROM fotos WHERE etapaId = :etapaId ORDER BY fecha ASC")
     suspend fun obtenerFotosEtapa(etapaId: Long): List<Foto>
@@ -114,6 +120,9 @@ interface AsistenciaDao {
     )
     fun observarPorFecha(obraId: Long): Flow<List<ResumenFecha>>
 
+    @Query("SELECT * FROM asistencias WHERE obraId = :obraId")
+    fun observarTodas(obraId: Long): Flow<List<Asistencia>>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun guardar(asistencia: Asistencia)
 
@@ -125,6 +134,9 @@ interface AsistenciaDao {
 interface GastoDao {
     @Query("SELECT * FROM gastos WHERE obraId = :obraId ORDER BY fecha DESC, id DESC")
     fun observarGastos(obraId: Long): Flow<List<Gasto>>
+
+    @Query("SELECT facturaRuta FROM gastos WHERE obraId = :obraId AND facturaRuta IS NOT NULL")
+    suspend fun facturasDeObra(obraId: Long): List<String>
 
     @Query("SELECT * FROM gastos WHERE id = :id")
     suspend fun obtenerGasto(id: Long): Gasto?

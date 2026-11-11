@@ -9,7 +9,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -26,19 +32,27 @@ import androidx.compose.ui.unit.dp
 import com.obratrack.app.data.Obra
 import com.obratrack.app.ui.BarraSuperior
 import com.obratrack.app.ui.BotonPrincipal
+import com.obratrack.app.ui.BotonSecundario
 import com.obratrack.app.ui.Formato
 import com.obratrack.app.ui.ObraViewModel
 import com.obratrack.app.ui.SelectorFecha
 
 /** RF-01: crear o editar una obra (obraId = 0 significa obra nueva). */
 @Composable
-fun ObraFormScreen(vm: ObraViewModel, obraId: Long, onVolver: () -> Unit) {
+fun ObraFormScreen(
+    vm: ObraViewModel,
+    obraId: Long,
+    onVolver: () -> Unit,
+    onEliminada: () -> Unit = onVolver
+) {
     var nombre by rememberSaveable { mutableStateOf("") }
     var direccion by rememberSaveable { mutableStateOf("") }
     var presupuesto by rememberSaveable { mutableStateOf("") }
     var descripcion by rememberSaveable { mutableStateOf("") }
     var fechaInicio by rememberSaveable { mutableStateOf(Formato.hoy()) }
     var intento by remember { mutableStateOf(false) }
+    // 0 = sin diálogo, 1 = primera confirmación, 2 = confirmación final
+    var pasoEliminar by remember { mutableStateOf(0) }
 
     LaunchedEffect(obraId) {
         if (obraId != 0L) {
@@ -135,6 +149,48 @@ fun ObraFormScreen(vm: ObraViewModel, obraId: Long, onVolver: () -> Unit) {
                     )
                 }
             })
+            if (obraId != 0L) {
+                Spacer(Modifier.height(12.dp))
+                BotonSecundario(
+                    texto = "Eliminar obra",
+                    onClick = { pasoEliminar = 1 },
+                    icono = Icons.Default.Delete,
+                    peligro = true
+                )
+            }
         }
+    }
+
+    if (pasoEliminar == 1) {
+        AlertDialog(
+            onDismissRequest = { pasoEliminar = 0 },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("¿Eliminar la obra \"$nombre\"?") },
+            text = { Text("Se borrarán sus etapas, fotos, personal, asistencia, gastos y facturas.") },
+            confirmButton = {
+                TextButton(onClick = { pasoEliminar = 2 }) { Text("Continuar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pasoEliminar = 0 }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    if (pasoEliminar == 2) {
+        AlertDialog(
+            onDismissRequest = { pasoEliminar = 0 },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Confirmación final") },
+            text = { Text("Esta acción NO se puede deshacer. ¿Seguro que quieres eliminar \"$nombre\" para siempre?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pasoEliminar = 0
+                    vm.eliminarObra(obraId, onEliminada)
+                }) { Text("Sí, eliminar", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pasoEliminar = 0 }) { Text("No, conservar") }
+            }
+        )
     }
 }

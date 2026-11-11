@@ -17,8 +17,13 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import android.widget.Toast
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Engineering
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -31,12 +36,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.obratrack.app.data.Asistencia
 import com.obratrack.app.data.CategoriaGasto
 import com.obratrack.app.data.Gasto
+import com.obratrack.app.data.ManoDeObra
 import com.obratrack.app.data.Obra
+import com.obratrack.app.data.Trabajador
 import com.obratrack.app.ui.EstadoVacio
 import com.obratrack.app.ui.Formato
 import com.obratrack.app.ui.ObraViewModel
@@ -49,6 +58,16 @@ import com.obratrack.app.ui.theme.Paleta
 fun TabBalance(vm: ObraViewModel, obra: Obra) {
     val flujo = remember(obra.id) { vm.gastos(obra.id) }
     val gastos by flujo.collectAsStateWithLifecycle(initialValue = emptyList<Gasto>())
+    val flujoTrabajadores = remember(obra.id) { vm.trabajadores(obra.id) }
+    val trabajadores by flujoTrabajadores.collectAsStateWithLifecycle(initialValue = emptyList<Trabajador>())
+    val flujoAsistencias = remember(obra.id) { vm.asistencias(obra.id) }
+    val asistencias by flujoAsistencias.collectAsStateWithLifecycle(initialValue = emptyList<Asistencia>())
+    val context = LocalContext.current
+
+    // Mano de obra calculada con la asistencia y la parte que todavía no se ha sumado como gasto.
+    val manoCalculada = ManoDeObra.costo(asistencias, trabajadores)
+    val manoSumada = gastos.filter { it.deAsistencia }.sumOf { it.monto }
+    val manoPendiente = manoCalculada - manoSumada
 
     val gastado = gastos.sumOf { it.monto }
     val disponible = obra.presupuesto - gastado
@@ -120,7 +139,17 @@ fun TabBalance(vm: ObraViewModel, obra: Obra) {
 
         item { TituloSeccion("Gasto por categoría") }
 
-        if (gastos.isEmpty()) {
+        if (manoCalculada > 0L) {
+            item {
+                TarjetaManoDeObra(calculada = manoCalculada, sumada = manoSumada, pendiente = manoPendiente) {
+                    vm.sumarManoDeObra(obra.id, manoPendiente) {
+                        Toast.makeText(context, "Mano de obra sumada al presupuesto", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+        if (gastos.isEmpty() && manoCalculada == 0L) {
             item {
                 EstadoVacio(
                     icono = Icons.Default.Assessment,
@@ -181,6 +210,55 @@ private fun FilaCategoria(categoria: CategoriaGasto, monto: Long, cantidad: Int,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.End
+                )
+            }
+        }
+    }
+}
+
+/** Mano de obra que sale de la asistencia, con el botón para registrarla como gasto. */
+@Composable
+private fun TarjetaManoDeObra(calculada: Long, sumada: Long, pendiente: Long, onSumar: () -> Unit) {
+    val color = Color(CategoriaGasto.MANO_DE_OBRA.argb)
+    TarjetaBase(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Engineering, contentDescription = null, tint = color)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Mano de obra según asistencia",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(Formato.pesos(calculada), style = MaterialTheme.typography.titleMedium, color = color)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Ya sumado al presupuesto: ${Formato.pesos(sumada)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (pendiente > 0L) {
+                Text(
+                    "Pendiente por sumar: ${Formato.pesos(pendiente)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Paleta.Ambar
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = onSumar,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = color)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Sumar ${Formato.pesos(pendiente)} al presupuesto")
+                }
+            } else {
+                Text(
+                    "Todo está sumado al presupuesto",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Paleta.Verde
                 )
             }
         }

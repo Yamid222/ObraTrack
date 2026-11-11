@@ -8,16 +8,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -92,22 +95,50 @@ fun FotoVisor(
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
         Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
-            Box(Modifier.fillMaxSize()) {
+            // Las acciones van arriba, en una barra fija, para que se vean en cualquier tamaño de pantalla.
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xB3000000))
+                        .statusBarsPadding()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onCerrar) {
+                        Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.White)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (latitud != null && longitud != null) {
+                        TextButton(onClick = {
+                            val intento = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$latitud,$longitud"))
+                            try {
+                                context.startActivity(intento)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No hay una aplicación de mapas instalada", Toast.LENGTH_SHORT).show()
+                            }
+                        }) {
+                            Icon(Icons.Default.LocationOn, contentDescription = null, tint = Color(0xFFFDBA74))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Mapa", color = Color(0xFFFDBA74), maxLines = 1)
+                        }
+                    }
+                    if (onEliminar != null) {
+                        TextButton(onClick = onEliminar) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFFCA5A5))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Eliminar", color = Color(0xFFFCA5A5), maxLines = 1)
+                        }
+                    }
+                }
                 AsyncImage(
                     model = File(ruta),
                     contentDescription = "Foto",
                     contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxWidth().weight(1f)
                 )
-                IconButton(
-                    onClick = onCerrar,
-                    modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = Color.White)
-                }
                 Column(
                     Modifier
-                        .align(Alignment.BottomStart)
                         .fillMaxWidth()
                         .background(Color(0xB3000000))
                         .navigationBarsPadding()
@@ -127,21 +158,6 @@ fun FotoVisor(
                         color = Color.White.copy(alpha = 0.8f),
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    Row {
-                        if (latitud != null && longitud != null) {
-                            TextButton(onClick = {
-                                val intento = Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$latitud,$longitud"))
-                                try {
-                                    context.startActivity(intento)
-                                } catch (e: Exception) {
-                                    Toast.makeText(context, "No hay una aplicación de mapas instalada", Toast.LENGTH_SHORT).show()
-                                }
-                            }) { Text("Ver en el mapa", color = Color(0xFFFDBA74)) }
-                        }
-                        if (onEliminar != null) {
-                            TextButton(onClick = onEliminar) { Text("Eliminar foto", color = Color(0xFFFCA5A5)) }
-                        }
-                    }
                 }
             }
         }

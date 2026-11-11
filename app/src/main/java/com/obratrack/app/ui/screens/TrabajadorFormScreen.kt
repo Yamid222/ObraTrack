@@ -1,5 +1,6 @@
 package com.obratrack.app.ui.screens
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -54,6 +56,8 @@ fun TrabajadorFormScreen(
     var cargo by rememberSaveable { mutableStateOf("") }
     var tipo by rememberSaveable { mutableStateOf(TipoPago.JORNAL.name) }
     var valor by rememberSaveable { mutableStateOf("") }
+    var horasDia by rememberSaveable { mutableStateOf("8") }
+    var diasSemana by rememberSaveable { mutableStateOf(6) }
     var intento by remember { mutableStateOf(false) }
     var confirmarEliminar by remember { mutableStateOf(false) }
     var original by remember { mutableStateOf<Trabajador?>(null) }
@@ -66,6 +70,8 @@ fun TrabajadorFormScreen(
                 cargo = it.cargo
                 tipo = it.tipoPago
                 valor = it.valor.toString()
+                horasDia = Formato.numero(it.horasDia)
+                diasSemana = it.diasSemana
             }
         }
     }
@@ -73,6 +79,8 @@ fun TrabajadorFormScreen(
     val valorNumero = valor.toLongOrNull()
     val valorValido = valorNumero != null && valorNumero > 0
     val tipoActual = TipoPago.desde(tipo)
+    val horasNumero = horasDia.replace(',', '.').toDoubleOrNull()
+    val horasValidas = !tipoActual.porHoras || (horasNumero != null && horasNumero > 0 && horasNumero <= 24)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -129,9 +137,25 @@ fun TrabajadorFormScreen(
                     Column {
                         Text(opcion.etiqueta, style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (opcion == TipoPago.JORNAL) "Se paga por día trabajado" else "Se paga por cada unidad de trabajo hecha",
+                            when (opcion) {
+                                TipoPago.JORNAL -> "Se paga por día trabajado"
+                                TipoPago.SEMANA -> "Se paga un valor fijo por semana"
+                                TipoPago.DESTAJO -> "Se paga por cada unidad de trabajo hecha"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            if (tipoActual == TipoPago.SEMANA) {
+                TituloSeccion("Días de la semana de trabajo")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    listOf(5, 6).forEach { n ->
+                        FilterChip(
+                            selected = diasSemana == n,
+                            onClick = { diasSemana = n },
+                            label = { Text("Semana de $n días", style = MaterialTheme.typography.bodyLarge) }
                         )
                     }
                 }
@@ -140,7 +164,15 @@ fun TrabajadorFormScreen(
             OutlinedTextField(
                 value = valor,
                 onValueChange = { nuevo -> valor = nuevo.filter { it.isDigit() }.take(10) },
-                label = { Text(if (tipoActual == TipoPago.JORNAL) "Valor del jornal *" else "Valor por unidad *") },
+                label = {
+                    Text(
+                        when (tipoActual) {
+                            TipoPago.JORNAL -> "Valor del jornal *"
+                            TipoPago.SEMANA -> "Valor de la semana *"
+                            TipoPago.DESTAJO -> "Valor por unidad *"
+                        }
+                    )
+                },
                 prefix = { Text("$ ") },
                 isError = intento && !valorValido,
                 supportingText = {
@@ -154,10 +186,27 @@ fun TrabajadorFormScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
+            if (tipoActual.porHoras) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = horasDia,
+                    onValueChange = { nuevo -> horasDia = nuevo.filter { it.isDigit() || it == '.' || it == ',' }.take(4) },
+                    label = { Text("Horas que trabaja al día *") },
+                    isError = intento && !horasValidas,
+                    supportingText = {
+                        if (intento && !horasValidas) Text("Ingresa entre 1 y 24 horas")
+                        else Text("Se usará por defecto al tomar la asistencia")
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
             Spacer(Modifier.height(24.dp))
             BotonPrincipal(texto = "Guardar trabajador", onClick = {
                 intento = true
-                if (nombre.isNotBlank() && cargo.isNotBlank() && valorValido) {
+                if (nombre.isNotBlank() && cargo.isNotBlank() && valorValido && horasValidas) {
                     vm.guardarTrabajador(
                         Trabajador(
                             id = trabajadorId,
@@ -165,7 +214,9 @@ fun TrabajadorFormScreen(
                             nombre = nombre.trim(),
                             cargo = cargo.trim(),
                             tipoPago = tipo,
-                            valor = valorNumero ?: 0L
+                            valor = valorNumero ?: 0L,
+                            horasDia = if (tipoActual.porHoras) horasNumero ?: 8.0 else 8.0,
+                            diasSemana = diasSemana
                         ),
                         onVolver
                     )

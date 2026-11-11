@@ -18,12 +18,17 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.obratrack.app.data.AcumuladoTrabajador
+import com.obratrack.app.data.ManoDeObra
 import com.obratrack.app.data.Asistencia
 import com.obratrack.app.data.Obra
 import com.obratrack.app.data.ResumenFecha
@@ -54,9 +60,14 @@ import com.obratrack.app.ui.IconoCircular
 import com.obratrack.app.ui.ObraViewModel
 import com.obratrack.app.ui.SelectorFecha
 import com.obratrack.app.ui.TarjetaBase
+import com.obratrack.app.ui.TituloSeccion
 import com.obratrack.app.ui.theme.Paleta
 
 private fun leerCantidad(texto: String): Double? = texto.replace(',', '.').toDoubleOrNull()
+
+/** Valor que se propone al marcar asistencia: las horas del día del trabajador, o vacío si es destajo. */
+private fun cantidadPorDefecto(t: Trabajador): String =
+    if (TipoPago.desde(t.tipoPago).porHoras) Formato.numero(t.horasDia) else ""
 
 /** RF-05: registro diario de asistencia y consolidado por trabajador y por fecha. */
 @Composable
@@ -67,22 +78,24 @@ fun TabAsistencia(vm: ObraViewModel, obra: Obra) {
     val trabajadores by flujoTrabajadores.collectAsStateWithLifecycle(initialValue = emptyList<Trabajador>())
 
     Column(Modifier.fillMaxSize()) {
-        TabRow(
+        ScrollableTabRow(
             selectedTabIndex = subtab,
             containerColor = MaterialTheme.colorScheme.background,
-            contentColor = MaterialTheme.colorScheme.primary
+            contentColor = MaterialTheme.colorScheme.primary,
+            edgePadding = 8.dp
         ) {
-            listOf("Registrar", "Por trabajador", "Por fecha").forEachIndexed { i, titulo ->
+            listOf("Registrar", "Por trabajador", "Por fecha", "Pagos").forEachIndexed { i, titulo ->
                 Tab(selected = subtab == i, onClick = { subtab = i }, text = { Text(titulo, maxLines = 1) })
             }
         }
         when (subtab) {
             0 -> RegistroAsistencia(vm, obra, trabajadores, fecha) { fecha = it }
             1 -> AsistenciaPorTrabajador(vm, obra)
-            else -> AsistenciaPorFecha(vm, obra) { elegida ->
+            2 -> AsistenciaPorFecha(vm, obra) { elegida ->
                 fecha = elegida
                 subtab = 0
             }
+            else -> PagosSemana(vm, obra, trabajadores)
         }
     }
 }
@@ -140,7 +153,7 @@ private fun RegistroAsistencia(
                 TextButton(onClick = {
                     trabajadores.forEach { t ->
                         if (cantidades[t.id] == null) {
-                            cantidades[t.id] = if (TipoPago.desde(t.tipoPago) == TipoPago.JORNAL) "8" else ""
+                            cantidades[t.id] = cantidadPorDefecto(t)
                         }
                     }
                 }) { Text("Marcar todos") }
@@ -154,7 +167,7 @@ private fun RegistroAsistencia(
                     Checkbox(
                         checked = texto != null,
                         onCheckedChange = { marcado ->
-                            if (marcado) cantidades[trabajador.id] = if (tipo == TipoPago.JORNAL) "8" else ""
+                            if (marcado) cantidades[trabajador.id] = cantidadPorDefecto(trabajador)
                             else cantidades.remove(trabajador.id)
                         }
                     )
@@ -292,6 +305,133 @@ private fun AsistenciaPorFecha(vm: ObraViewModel, obra: Obra, onElegir: (Long) -
                         )
                     }
                     Text("Ver", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
+}
+
+/** Resumen de lo que se debe pagar en la semana actual y el total histórico de mano de obra. */
+@Composable
+private fun PagosSemana(vm: ObraViewModel, obra: Obra, trabajadores: List<Trabajador>) {
+    val flujo = remember(obra.id) { vm.asistencias(obra.id) }
+    val asistencias by flujo.collectAsStateWithLifecycle(initialValue = emptyList<Asistencia>())
+    var verTotal by rememberSaveable { mutableStateOf(false) }
+
+    if (trabajadores.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            EstadoVacio(
+                icono = Icons.Default.Payments,
+                titulo = "Primero registra personal",
+                texto = "Cuando tengas trabajadores y tomes la asistencia, aquí verás cuánto se debe pagar cada semana."
+            )
+        }
+        return
+    }
+
+    val inicio = ManoDeObra.inicioSemanaActual()
+    val fin = inicio + 6 * ManoDeObra.DIA
+    val deLaSemana = asistencias.filter { it.fecha in inicio..fin }
+    val totalSemana = ManoDeObra.costo(deLaSemana, trabajadores)
+    val totalObra = ManoDeObra.costo(asistencias, trabajadores)
+    // Total de cada semana, de la más reciente a la más antigua.
+    val porSemana = asistencias
+        .groupBy { ManoDeObra.inicioSemana(it.fecha) }
+        .map { (lunes, lista) -> lunes to ManoDeObra.costo(lista, trabajadores) }
+        .sortedByDescending { it.first }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            TarjetaBase(Modifier.fillMaxWidth(), onClick = { verTotal = !verTotal }) {
+                Column(Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconoCircular(Icons.Default.Payments, Paleta.Verde)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Semana actual", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "${Formato.fecha(inicio)} al ${Formato.fecha(fin)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            if (verTotal) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (verTotal) "Ocultar total" else "Ver total de mano de obra"
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        Formato.pesos(totalSemana),
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = Paleta.Verde
+                    )
+                    Text(
+                        "Mano de obra de esta semana",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (verTotal) {
+                        Spacer(Modifier.height(14.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(12.dp))
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Total mano de obra de la obra",
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(Formato.pesos(totalObra), style = MaterialTheme.typography.titleMedium, color = Paleta.Naranja)
+                        }
+                        porSemana.forEach { (lunes, monto) ->
+                            Row(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                                Text(
+                                    "Semana del ${Formato.fecha(lunes)}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(Formato.pesos(monto), style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
+                    } else {
+                        Text(
+                            "Toca para ver el total de mano de obra",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+        item { TituloSeccion("Trabajadores esta semana") }
+        items(trabajadores, key = { it.id }) { t ->
+            val tipo = TipoPago.desde(t.tipoPago)
+            val suyas = deLaSemana.filter { it.trabajadorId == t.id }
+            val pago = suyas.sumOf { ManoDeObra.costoDia(t, it.cantidad) }
+            TarjetaBase(Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(t.nombre, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "${t.cargo} · ${tipo.etiqueta}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            "${suyas.size} de ${t.diasSemana} días",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = if (suyas.size >= t.diasSemana) Paleta.Verde else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(Formato.pesos(pago), style = MaterialTheme.typography.bodyMedium, color = Paleta.Naranja)
+                    }
                 }
             }
         }

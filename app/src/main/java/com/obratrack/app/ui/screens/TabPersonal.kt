@@ -68,7 +68,11 @@ fun TabPersonal(vm: ObraViewModel, obra: Obra, navegar: (String) -> Unit) {
 @Composable
 private fun TarjetaTrabajador(trabajador: Trabajador, onClick: () -> Unit) {
     val tipo = TipoPago.desde(trabajador.tipoPago)
-    val color = if (tipo == TipoPago.JORNAL) Paleta.Naranja else Color(0xFF2563EB)
+    val color = when (tipo) {
+        TipoPago.JORNAL -> Paleta.Naranja
+        TipoPago.SEMANA -> Color(0xFF16A34A)
+        TipoPago.DESTAJO -> Color(0xFF2563EB)
+    }
 
     TarjetaBase(modifier = Modifier.fillMaxWidth(), onClick = onClick) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -94,7 +98,8 @@ private fun TarjetaTrabajador(trabajador: Trabajador, onClick: () -> Unit) {
             Column(horizontalAlignment = Alignment.End) {
                 Etiqueta(tipo.etiqueta, color)
                 Text(
-                    "${Formato.pesos(trabajador.valor)} ${tipo.valorPor}",
+                    "${Formato.pesos(trabajador.valor)} ${tipo.valorPor}" +
+                        if (tipo == TipoPago.SEMANA) " (${trabajador.diasSemana} días)" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)

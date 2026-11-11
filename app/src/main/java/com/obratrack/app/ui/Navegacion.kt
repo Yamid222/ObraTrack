@@ -44,7 +44,13 @@ fun ObraTrackNav() {
 
         composable("obra_form/{obraId}", arguments = listOf(argumentoObra)) { entry ->
             val obraId = entry.arguments?.getLong("obraId") ?: 0L
-            ObraFormScreen(vm = vm, obraId = obraId, onVolver = volver)
+            ObraFormScreen(
+                vm = vm,
+                obraId = obraId,
+                onVolver = volver,
+                // Tras eliminarla se vuelve directo al listado (la pantalla de la obra ya no existe).
+                onEliminada = { nav.popBackStack(Rutas.OBRAS, inclusive = false) }
+            )
         }
 
         composable("obra/{obraId}", arguments = listOf(argumentoObra)) { entry ->

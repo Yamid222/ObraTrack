@@ -1,5 +1,6 @@
 package com.obratrack.app.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -78,12 +79,20 @@ data class Trabajador(
     val nombre: String,
     val cargo: String,
     val tipoPago: String = TipoPago.JORNAL.name,
-    val valor: Long
+    val valor: Long,
+    /** Horas de un día normal de trabajo (jornal y semana); es el valor por defecto en la asistencia. */
+    @ColumnInfo(defaultValue = "8") val horasDia: Double = 8.0,
+    /** Días que tiene la semana de trabajo acordada (5 o 6). */
+    @ColumnInfo(defaultValue = "6") val diasSemana: Int = 6
 )
 
 enum class TipoPago(val etiqueta: String, val unidad: String, val valorPor: String) {
     JORNAL("Jornal", "horas", "por jornal"),
+    SEMANA("Por semana", "horas", "por semana"),
     DESTAJO("Destajo", "unidades", "por unidad");
+
+    /** Jornal y semana se registran en horas; destajo en unidades. */
+    val porHoras: Boolean get() = this != DESTAJO
 
     companion object {
         fun desde(nombre: String): TipoPago =
@@ -123,7 +132,9 @@ data class Gasto(
     val monto: Long,
     val fecha: Long,
     val categoria: String = CategoriaGasto.MATERIALES.name,
-    val facturaRuta: String? = null
+    val facturaRuta: String? = null,
+    /** true si el gasto se creó con "Sumar al presupuesto" a partir de la asistencia. */
+    @ColumnInfo(defaultValue = "0") val deAsistencia: Boolean = false
 )
 
 enum class CategoriaGasto(val etiqueta: String, val argb: Long) {

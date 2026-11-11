@@ -47,6 +47,17 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Elimina la obra con todo lo asociado (etapas, fotos, personal, asistencia y gastos). */
+    fun eliminarObra(obraId: Long, alTerminar: () -> Unit) {
+        viewModelScope.launch {
+            val obra = obraDao.obtenerObra(obraId) ?: return@launch alTerminar()
+            val archivos = fotoDao.rutasDeObra(obraId) + gastoDao.facturasDeObra(obraId)
+            obraDao.eliminar(obra) // las tablas hijas se borran en cascada
+            archivos.forEach { Archivos.borrar(it) }
+            alTerminar()
+        }
+    }
+
     // ---------- Etapas y fotos (RF-02, RF-03, RF-10) ----------
     fun etapas(obraId: Long): Flow<List<Etapa>> = etapaDao.observarEtapas(obraId)
     fun fotos(obraId: Long): Flow<List<Foto>> = fotoDao.observarFotosObra(obraId)
@@ -111,6 +122,8 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
     fun asistenciaPorFecha(obraId: Long): Flow<List<ResumenFecha>> =
         asistenciaDao.observarPorFecha(obraId)
 
+    fun asistencias(obraId: Long): Flow<List<Asistencia>> = asistenciaDao.observarTodas(obraId)
+
     fun guardarAsistencia(
         fecha: Long,
         presentes: List<Asistencia>,
@@ -146,6 +159,25 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Registra como gasto de mano de obra lo calculado por asistencia que aún no se ha sumado. */
+    fun sumarManoDeObra(obraId: Long, monto: Long, alTerminar: () -> Unit) {
+        if (monto <= 0L) return
+        viewModelScope.launch {
+            val hoy = Formato.hoy()
+            gastoDao.insertar(
+                Gasto(
+                    obraId = obraId,
+                    descripcion = "Mano de obra según asistencia (hasta ${Formato.fecha(hoy)})",
+                    monto = monto,
+                    fecha = hoy,
+                    categoria = CategoriaGasto.MANO_DE_OBRA.name,
+                    deAsistencia = true
+                )
+            )
+            alTerminar()
+        }
+    }
+
     // ---------- Datos de ejemplo para probar la app ----------
     fun cargarEjemplo() {
         viewModelScope.launch {
@@ -166,6 +198,7 @@ class ObraViewModel(application: Application) : AndroidViewModel(application) {
             etapaDao.insertar(Etapa(obraId = obraId, nombre = "Acabados", descripcion = "Pañete, pisos y pintura.", estado = EstadoEtapa.PENDIENTE.name, fecha = hoy + 10 * dia))
 
             val pedro = trabajadorDao.insertar(Trabajador(obraId = obraId, nombre = "Pedro Gómez", cargo = "Oficial de obra", tipoPago = TipoPago.JORNAL.name, valor = 90_000L))
+            trabajadorDao.insertar(Trabajador(obraId = obraId, nombre = "Jorge Ruiz", cargo = "Maestro de obra", tipoPago = TipoPago.SEMANA.name, valor = 600_000L, horasDia = 9.0, diasSemana = 6))
             val luis = trabajadorDao.insertar(Trabajador(obraId = obraId, nombre = "Luis Martínez", cargo = "Ayudante", tipoPago = TipoPago.JORNAL.name, valor = 60_000L))
             val carlos = trabajadorDao.insertar(Trabajador(obraId = obraId, nombre = "Carlos Pérez", cargo = "Instalador de pisos", tipoPago = TipoPago.DESTAJO.name, valor = 18_000L))
             for (i in 0..2) {

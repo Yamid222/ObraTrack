@@ -193,7 +193,9 @@ fun GastoFormScreen(
                             monto = montoNumero ?: 0L,
                             fecha = fecha,
                             categoria = categoria,
-                            facturaRuta = facturaRuta
+                            facturaRuta = facturaRuta,
+                            // Conserva la marca si el gasto vino de "Sumar al presupuesto".
+                            deAsistencia = original?.deAsistencia ?: false
                         ),
                         rutaParaBorrar = sobrante,
                         alTerminar = onVolver
